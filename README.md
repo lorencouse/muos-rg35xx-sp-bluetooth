@@ -1,16 +1,17 @@
-# Bluetooth, USB-C audio and Wi-Fi auto-connect for the Anbernic RG35XX SP on muOS
+# Bluetooth + USB-C audio for the Anbernic RG35XX SP on muOS
 
-Three things [muOS](https://muos.dev) doesn't do on the RG35XX SP, in one
+Two things [muOS](https://muos.dev) doesn't do on the RG35XX SP, in one
 Archive Manager install:
 
 - **Bluetooth headphones** — a full-screen manager app for pairing, connecting,
   switching audio output, plus auto-reconnect at boot
 - **USB-C headphones** — plug-and-play, automatic routing, inline media buttons
-- **Wi-Fi auto-connect** — connect at boot to the best *saved* network in range,
-  by priority, instead of only the last one used
-- **SP control pack** — the D-pad becomes the analog stick automatically for
-  N64 / PSP / Dreamcast (no more L2+R2+A every launch), N64 C-buttons on the
-  face buttons, PlayStation analog pad
+
+Wi-Fi auto-connect and the SP control pack live in their own repos now:
+[muos-wifi-autoconnect](https://github.com/lorencouse/muos-wifi-autoconnect),
+[muos-rg35xx-sp-controls](https://github.com/lorencouse/muos-rg35xx-sp-controls) —
+or get everything at once from
+[muos-rg35xx-sp-all-in-one](https://github.com/lorencouse/muos-rg35xx-sp-all-in-one).
 
 ![Main screen](docs/img/main-screen.png)
 
@@ -54,7 +55,7 @@ you're at the launcher.
 
 ## Install
 
-1. Download `muOS-BT-USB-WiFi-<version>.muxzip` from the
+1. Download `muOS-BT-USB-Audio-<version>.muxzip` from the
    [latest release](https://github.com/lorencouse/muos-rg35xx-sp-bluetooth/releases/latest).
 2. Copy it into the `ARCHIVE` folder on the SD card (over USB, or SFTP /
    the web file manager while on Wi-Fi).
@@ -63,9 +64,6 @@ you're at the launcher.
    ```
    MUOS/application/Bluetooth/   the app, helpers, USB-audio kernel modules
    MUOS/init/10-bluetooth.sh     boot hook: Bluetooth + USB-C audio
-   MUOS/init/20-wifi-autoconnect.sh  boot hook: Wi-Fi by priority
-   MUOS/init/30-sp-controls.sh   boot hook: control pack
-   MUOS/info/override/           per-folder launch overrides (D-pad mode)
    ```
 4. Enable **Configuration → Advanced Settings → User Init Scripts** so the
    boot hooks run, then reboot.
@@ -74,11 +72,8 @@ you're at the launcher.
 Manual alternative: copy this repo's `MUOS` folder onto the card, merging
 with the existing one. Either way it all lives on the SD card, so muOS
 updates won't remove it, and it works whether your `MUOS` folder is on SD1
-or SD2. Logs: `MUOS/log/bluetooth.log` and `MUOS/log/wifi.log` (rotated).
-To uninstall, delete the three paths above.
-
-Don't want a piece of it? Delete `MUOS/init/20-wifi-autoconnect.sh` (Wi-Fi)
-or `MUOS/init/30-sp-controls.sh` + `MUOS/info/override/` (controls).
+or SD2. Log: `MUOS/log/bluetooth.log` (rotated). To uninstall, delete the
+two paths above.
 
 Building the package yourself: `./build.sh` → `dist/*.muxzip`.
 
@@ -121,61 +116,6 @@ stack is built into muOS). Rebuild
 instructions: [mnml's gist](https://gist.github.com/mnml/12f75bbf16eac4def15ba72cf1b11926)
 (vanilla kernel.org 4.9.170 source + Knulli's kernel config + the module
 directories `sound/core`, `sound/usb`, `drivers/usb/class`).
-
-## Wi-Fi: auto-connect to the best saved network
-
-Unrelated to Bluetooth, but the same install and it fixes the other radio.
-Stock muOS only ever reconnects to the *last used* network, so moving between
-home, work and a phone hotspot means opening the profile menu every time.
-`MUOS/init/20-wifi-autoconnect.sh` runs at boot, scans once, and connects to
-the saved profile (`MUOS/network/*.ini`, created with **Y** on the Wi-Fi
-Network screen after connecting) with the highest priority that is actually in range — strongest
-signal on a tie. It loads the profile the same way the Network Profiles
-screen does and then hands off to muOS's own `network.sh`, so all the stock
-error handling applies.
-
-Two optional keys you can add to any profile `.ini`:
-
-```ini
-priority=10      # higher wins when several saved networks are in range (default 0)
-autoconnect=0    # never pick this one automatically (default: allowed)
-```
-
-Leave **Start Network on Boot** off — the hook replaces it (if it is on and
-muOS already connected, the hook does nothing). Log: `MUOS/log/wifi.log`.
-Wake-from-sleep still uses muOS's own *Start Network on Wake* behaviour.
-
-## SP control pack
-
-The SP has no analog stick. muOS can make the D-pad act as the left stick
-(**L2+R2+A** in game), but it forgets on every launch. This pack sets it per
-folder at launch time using muOS's own *launch override* mechanism
-(`MUOS/info/override/<folder>.sh`) — which is inert on stock 2601 because the
-rootfs path `launch.sh` reads doesn't exist; the boot hook binds the card's
-folder there. Edit `MUOS/info/override/sp-controls/dpad.conf`:
-
-```ini
-n64=stick        # whole folder: D-pad drives the analog stick (one rumble at launch)
-psp=stick
-dreamcast=stick
-psx=dpad         # plain D-pad; flip per game:
-psx/Ape Escape (USA)=stick
-```
-
-Only folders with an override script are affected (`n64 psp dreamcast psx`);
-copy `n64.sh` to `<folder>.sh` for another one. PortMaster content is not
-covered (muOS 2601.1 fixes the toggle for ports itself).
-
-Controller defaults it also applies (RetroArch per-core options, re-applied
-every boot since they live on the rootfs):
-
-- **N64 (Mupen64Plus-Next)** — "Independent C-button Controls":
-  **B**=A, **Y**=B, **A**=C-Down, **X**=C-Up, **L1/R1**=C-Left/Right,
-  **L2**=Z, **R2**=R, **SELECT**=L. Stock needs R2 held to reach the C-buttons.
-- **PlayStation (PCSX-ReARMed)** — pad type *analog* (DualShock), so stick
-  mode actually moves the character in analog games.
-
-Log: `MUOS/log/controls.log`.
 
 ## Limitations
 
@@ -221,7 +161,7 @@ This builds on prior work by others:
   other Bluetooth app for muOS (Banana → Jacaranda builds, controllers and
   keyboards too). It installs onto the muOS rootfs as a `.muxupd`; this
   project is audio-focused, lives entirely on the SD card, and adds the
-  USB-C audio and Wi-Fi pieces. Use whichever fits.
+  USB-C audio piece. Use whichever fits.
 - **[MustardOS](https://github.com/MustardOS)** — muOS itself ships the entire
   Bluetooth stack this project switches on; `muterm` makes the UI possible.
 - **USB-C audio** stands on the DirtyWave M8 community's work:
