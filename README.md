@@ -89,6 +89,9 @@ the boot hook loads them, so:
    detection on this wiring senses only one orientation
 3. Audio routes to the headphones automatically within a few seconds
    (`usb-audio-watch.sh`), and back to the speaker when unplugged
+4. **Inline media buttons work**: volume up/down drive muOS's own volume
+   (on-screen overlay included); play/pause toggles pause in RetroArch
+   (`usb-media-buttons.py`)
 
 The port switches back to gadget mode (USB file transfer / adb) by itself
 when you plug a computer back in. Do **not** try to switch roles manually via

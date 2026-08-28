@@ -17,6 +17,9 @@ while :; do
 			wpctl set-mute "$ID" 0
 			wpctl set-volume "$ID" 0.75
 		fi
+		# inline media buttons (exits on its own at unplug)
+		pgrep -f "usb-media-buttons.p[y]" >/dev/null 2>&1 ||
+			setsid python3 /mnt/mmc/MUOS/bluetooth/usb-media-buttons.py >/dev/null 2>&1 </dev/null &
 	elif [ -z "$NODE" ] && [ -n "$PREV" ]; then
 		BT_RESTORE_SPEAKER
 	fi
