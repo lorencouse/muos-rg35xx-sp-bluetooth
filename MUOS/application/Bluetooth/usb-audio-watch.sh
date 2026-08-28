@@ -6,7 +6,7 @@
 # Keyed on node.name AND node id: a WirePlumber restart keeps the name but
 # hands out a new id, and the default must be re-applied then too.
 
-. /mnt/mmc/MUOS/bluetooth/bt-common.sh
+. /run/muos/storage/application/Bluetooth/bt-common.sh
 
 PREV=""
 while :; do

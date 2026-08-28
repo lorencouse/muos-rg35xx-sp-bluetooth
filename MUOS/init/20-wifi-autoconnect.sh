@@ -19,7 +19,7 @@
 
 ROM_MOUNT="$(GET_VAR "device" "storage/rom/mount")"
 [ -n "$ROM_MOUNT" ] || ROM_MOUNT="/mnt/mmc"
-PROFILES="$ROM_MOUNT/MUOS/network"
+PROFILES="$MUOS_STORE_DIR/network"   # bind: SD1 or SD2, whichever muOS uses
 LOG="$ROM_MOUNT/MUOS/log/wifi.log"
 STATUS="$MUOS_RUN_DIR/network.status"
 

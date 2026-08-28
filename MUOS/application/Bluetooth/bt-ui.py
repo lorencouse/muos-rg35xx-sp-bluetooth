@@ -7,7 +7,7 @@ straight from the gamepad's evdev node, independent of the pty.
 """
 import json, os, re, select, struct, subprocess, sys, time
 
-BT_DIR = "/mnt/mmc/MUOS/bluetooth"          # same constant as bt-common.sh
+BT_DIR = "/run/muos/storage/application/Bluetooth"  # same as bt-common.sh
 STATE = os.path.join(BT_DIR, "state")
 REGISTRY = os.path.join(STATE, "devices.json")
 PF_INTERNAL = "/opt/muos/device/config/audio/pf_internal"

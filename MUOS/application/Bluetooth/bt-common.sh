@@ -1,11 +1,14 @@
 #!/bin/sh
 # Shared Bluetooth/audio helpers for the Anbernic RG35XX SP (RTL8821CS, HCI
 # over UART). muOS ships the whole stack but never attaches the adapter, so we
-# do it here. Lives on the exfat card so muOS updates cannot wipe it.
+# do it here. Lives on the SD card so muOS updates cannot wipe it.
 #
 # Sourced by 10-bluetooth.sh, usb-audio-watch.sh and bt-ui.py (via sh -c).
+#
+# Paths go through muOS's storage binds (/run/muos/storage/...) so they are
+# right whether MUOS/ lives on SD1 or SD2.
 
-BT_DIR="/mnt/mmc/MUOS/bluetooth"
+BT_DIR="/run/muos/storage/application/Bluetooth"
 BT_STATE="$BT_DIR/state"
 BT_KMOD="/lib/modules/4.9.170/kernel/drivers/bluetooth/rtl_btlpm.ko"
 

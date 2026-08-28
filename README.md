@@ -1,9 +1,13 @@
-# Bluetooth + USB-C audio for the Anbernic RG35XX SP on muOS
+# Bluetooth, USB-C audio and Wi-Fi auto-connect for the Anbernic RG35XX SP on muOS
 
-Bluetooth headphones **and USB-C headphones** on the RG35XX SP running
-[muOS](https://muos.dev) — a full-screen manager app for pairing, connecting,
-switching audio output and auto-reconnect at boot, plus plug-and-play USB-C
-audio with automatic routing.
+Three things [muOS](https://muos.dev) doesn't do on the RG35XX SP, in one
+Archive Manager install:
+
+- **Bluetooth headphones** — a full-screen manager app for pairing, connecting,
+  switching audio output, plus auto-reconnect at boot
+- **USB-C headphones** — plug-and-play, automatic routing, inline media buttons
+- **Wi-Fi auto-connect** — connect at boot to the best *saved* network in range,
+  by priority, instead of only the last one used
 
 ![Main screen](docs/img/main-screen.png)
 
@@ -47,32 +51,30 @@ you're at the launcher.
 
 ## Install
 
-1. Power off the device and put its SD1 card in your computer
-   (or use the muOS USB/SFTP file transfer — everything lives on the exfat
-   partition your computer can see).
-2. Copy the `MUOS` folder from this repo onto the root of the card, merging
-   with the existing `MUOS` folder. Nothing is overwritten; it only adds:
+1. Download `muOS-BT-USB-WiFi-<version>.muxzip` from the
+   [latest release](https://github.com/lorencouse/muos-rg35xx-sp-bluetooth/releases/latest).
+2. Copy it into the `ARCHIVE` folder on the SD card (over USB, or SFTP /
+   the web file manager while on Wi-Fi).
+3. On the device: **Applications → Archive Manager**, select the file. It
+   installs:
    ```
-   MUOS/application/Bluetooth/    the manager app
-   MUOS/bluetooth/bt-common.sh    shared bringup helpers
-   MUOS/bluetooth/modules/        USB-audio kernel modules (see USB-C section)
-   MUOS/bluetooth/usb-audio-watch.sh  USB headphone auto-routing
-   MUOS/init/10-bluetooth.sh      boot hook
-   MUOS/init/20-wifi-autoconnect.sh  Wi-Fi: connect to best saved profile (optional)
+   MUOS/application/Bluetooth/   the app, helpers, USB-audio kernel modules
+   MUOS/init/10-bluetooth.sh     boot hook: Bluetooth + USB-C audio
+   MUOS/init/20-wifi-autoconnect.sh  boot hook: Wi-Fi by priority
    ```
-3. Boot the device and enable **Configuration → Advanced Settings →
-   User Init Scripts** so the boot hook runs.
-4. Reboot, then open **Applications → Bluetooth** and pair your headphones.
+4. Enable **Configuration → Advanced Settings → User Init Scripts** so the
+   boot hooks run, then reboot.
+5. **Applications → Bluetooth** to pair your headphones.
 
-Everything lives on the SD card's exfat partition, so muOS updates won't
-remove it. Log file: `MUOS/log/bluetooth.log` (kept to a few hundred lines).
-To uninstall, delete the paths listed above plus `MUOS/bluetooth/state/`.
+Manual alternative: copy this repo's `MUOS` folder onto the card, merging
+with the existing one. Either way it all lives on the SD card, so muOS
+updates won't remove it, and it works whether your `MUOS` folder is on SD1
+or SD2. Logs: `MUOS/log/bluetooth.log` and `MUOS/log/wifi.log` (rotated).
+To uninstall, delete the three paths above.
 
-**Using a second SD card?** muOS gives SD2 priority for `MUOS/init` and
-`MUOS/application`: if your SD2 already has those folders, copy this repo's
-`MUOS` folder onto **SD2** as well (or instead), otherwise the boot hook and
-app on SD1 are shadowed and never run. The scripts themselves always look for
-their helpers under `/mnt/mmc/MUOS/bluetooth` (SD1).
+Don't want the Wi-Fi hook? Delete `MUOS/init/20-wifi-autoconnect.sh`.
+
+Building the package yourself: `./build.sh` → `dist/*.muxzip`.
 
 ## Tested on
 
@@ -87,7 +89,7 @@ Reports welcome.
 muOS's kernel omits `CONFIG_SND_USB_AUDIO`, so USB-C audio doesn't work out of
 the box — but the kernel *does* auto-switch the OTG port between gadget and
 host when it detects a peripheral, and compatible prebuilt kernel modules
-exist. This repo bundles the missing modules (`MUOS/bluetooth/modules/`,
+exist. This repo bundles the missing modules (`MUOS/application/Bluetooth/modules/`,
 built for the stock `4.9.170` kernel — vermagic-identical, loads cleanly) and
 the boot hook loads them, so:
 
@@ -121,7 +123,7 @@ Stock muOS only ever reconnects to the *last used* network, so moving between
 home, work and a phone hotspot means opening the profile menu every time.
 `MUOS/init/20-wifi-autoconnect.sh` runs at boot, scans once, and connects to
 the saved profile (`MUOS/network/*.ini`, created with **Y** on the Wi-Fi
-screen) with the highest priority that is actually in range — strongest
+Network screen after connecting) with the highest priority that is actually in range — strongest
 signal on a tie. It loads the profile the same way the Network Profiles
 screen does and then hands off to muOS's own `network.sh`, so all the stock
 error handling applies.
@@ -166,7 +168,9 @@ Wake-from-sleep still uses muOS's own *Start Network on Wake* behaviour.
 - Audio routing resolves PipeWire sinks by `node.name`, never by label —
   the SP exposes two sinks both labelled "Built-in Audio Stereo" (speaker and
   HDMI), and Bluetooth sink ids change on every reconnect.
-- Device registry: `MUOS/bluetooth/state/devices.json`.
+- Device registry: `MUOS/application/Bluetooth/state/devices.json`.
+- All paths go through muOS's storage binds (`/run/muos/storage/...`), so
+  the install works from SD1 or SD2.
 
 ## Credits
 

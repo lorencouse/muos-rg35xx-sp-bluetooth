@@ -6,13 +6,13 @@
 # adapter. This does the missing bringup, then reconnects any known device
 # marked auto-connect (most recently used first, first success wins).
 #
-# Managed by the Bluetooth app: /mnt/mmc/MUOS/application/Bluetooth
+# Lives with the Bluetooth app: MUOS/application/Bluetooth (helpers, modules)
 # Enabled by: Configuration > Advanced Settings > User Init Scripts
 
 . /opt/muos/script/var/func.sh
-. /mnt/mmc/MUOS/bluetooth/bt-common.sh
+. /run/muos/storage/application/Bluetooth/bt-common.sh
 
-LOG="/mnt/mmc/MUOS/log/bluetooth.log"
+LOG="$(GET_VAR "device" "storage/rom/mount")/MUOS/log/bluetooth.log"
 mkdir -p "$(dirname "$LOG")"
 # Keep the log bounded: only the last few hundred lines survive a boot.
 if [ -f "$LOG" ] && [ "$(wc -l <"$LOG")" -gt 400 ]; then
