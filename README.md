@@ -179,9 +179,11 @@ This builds on prior work by others:
 - **[donfreiday/rgxx35sp-bluetooth](https://github.com/donfreiday/rgxx35sp-bluetooth)** —
   first documented the RTL8821CS bringup on the RG35XX SP (`rtk_hciattach` on
   `/dev/ttyS1`) and the wpctl audio routing approach this project uses.
-- **[nvcuong1312/bltMuos](https://github.com/nvcuong1312/bltMuos)** — earlier
-  Bluetooth support for muOS (Pixie/Goose/Banana releases), which proved the
-  demand and the approach on this hardware family.
+- **[nvcuong1312/bltMuos](https://github.com/nvcuong1312/bltMuos)** — the
+  other Bluetooth app for muOS (Banana → Jacaranda builds, controllers and
+  keyboards too). It installs onto the muOS rootfs as a `.muxupd`; this
+  project is audio-focused, lives entirely on the SD card, and adds the
+  USB-C audio and Wi-Fi pieces. Use whichever fits.
 - **[MustardOS](https://github.com/MustardOS)** — muOS itself ships the entire
   Bluetooth stack this project switches on; `muterm` makes the UI possible.
 - **USB-C audio** stands on the DirtyWave M8 community's work:
