@@ -1,8 +1,9 @@
-# Bluetooth audio for the Anbernic RG35XX SP on muOS
+# Bluetooth + USB-C audio for the Anbernic RG35XX SP on muOS
 
-Bluetooth headphones on the RG35XX SP running [muOS](https://muos.dev) — with a
-full-screen manager app for pairing, connecting, switching audio output, and
-auto-reconnect at boot.
+Bluetooth headphones **and USB-C headphones** on the RG35XX SP running
+[muOS](https://muos.dev) — a full-screen manager app for pairing, connecting,
+switching audio output and auto-reconnect at boot, plus plug-and-play USB-C
+audio with automatic routing.
 
 ![Main screen](docs/img/main-screen.png)
 
@@ -52,9 +53,11 @@ you're at the launcher.
 2. Copy the `MUOS` folder from this repo onto the root of the card, merging
    with the existing `MUOS` folder. Nothing is overwritten; it only adds:
    ```
-   MUOS/application/Bluetooth/   the manager app
-   MUOS/bluetooth/bt-common.sh   shared bringup helpers
-   MUOS/init/10-bluetooth.sh     boot hook
+   MUOS/application/Bluetooth/    the manager app
+   MUOS/bluetooth/bt-common.sh    shared bringup helpers
+   MUOS/bluetooth/modules/        USB-audio kernel modules (see USB-C section)
+   MUOS/bluetooth/usb-audio-watch.sh  USB headphone auto-routing
+   MUOS/init/10-bluetooth.sh      boot hook
    ```
 3. Boot the device and enable **Configuration → Advanced Settings →
    User Init Scripts** so the boot hook runs.
@@ -72,15 +75,43 @@ Other H700 Anbernic boards muOS supports (RG35XX Plus / 2024 / RG34XX / RG40XX
 / CubeXX) use the same RTL8821CS combo chip and may work unchanged — untested.
 Reports welcome.
 
+## USB-C headphones
+
+muOS's kernel omits `CONFIG_SND_USB_AUDIO`, so USB-C audio doesn't work out of
+the box — but the kernel *does* auto-switch the OTG port between gadget and
+host when it detects a peripheral, and it force-load-compatible kernel modules
+exist. This repo bundles the missing modules (`MUOS/bluetooth/modules/`,
+built for the stock `4.9.170` kernel — vermagic-identical, loads cleanly) and
+the boot hook loads them, so:
+
+1. Plug USB-C headphones (or a USB-C→3.5mm DAC dongle) into the **OTG port**
+2. **If nothing happens within ~5 seconds, flip the plug 180°** — role
+   detection on this wiring senses only one orientation
+3. Audio routes to the headphones automatically within a few seconds
+   (`usb-audio-watch.sh`), and back to the speaker when unplugged
+
+The port switches back to gadget mode (USB file transfer / adb) by itself
+when you plug a computer back in. Do **not** try to switch roles manually via
+`/sys/devices/platform/soc/usbc0/otg_role` — that interface deadlocks the
+kernel's USB manager on this device (unkillable, needs a power cycle). The
+automatic detection is the only working path, and it is enough.
+
+Kernel-update caveat: the `.ko` modules match the stock `4.9.170` kernel. If
+a future muOS release ships a different kernel build they will silently stop
+loading (Bluetooth is unaffected — its stack is built into muOS). Rebuild
+instructions: [mnml's gist](https://gist.github.com/mnml/12f75bbf16eac4def15ba72cf1b11926)
+(vanilla kernel.org 4.9.170 source + Knulli's kernel config + the module
+directories `sound/core`, `sound/usb`, `drivers/usb/class`).
+
 ## Limitations
 
-- **SBC/Opus codecs only** (whatever PipeWire ships) — no AAC/aptX/LDAC.
-  Fine for games, adequate for music.
+- Bluetooth: **SBC/Opus codecs only** (whatever PipeWire ships) — no
+  AAC/aptX/LDAC. Fine for games, adequate for music.
 - Some devices (AirPods included) don't report battery over standard Bluetooth
   profiles; battery shows only when available.
-- **USB-C headphones are a kernel problem, not a config problem** — muOS's
-  kernel is built without `CONFIG_SND_USB_AUDIO` and ships no sound modules,
-  so no userspace work can enable them.
+- USB-C: **analog-only USB-C headphones** (passive, no DAC chip) can never
+  work — the port has no analog audio mode. Anything that is a real USB audio
+  device (almost all USB-C headsets and dongles) works.
 
 ## How it works
 
@@ -109,6 +140,15 @@ This builds on prior work by others:
   demand and the approach on this hardware family.
 - **[MustardOS](https://github.com/MustardOS)** — muOS itself ships the entire
   Bluetooth stack this project switches on; `muterm` makes the UI possible.
+- **USB-C audio** stands on the DirtyWave M8 community's work:
+  [mnml's build gist](https://gist.github.com/mnml/12f75bbf16eac4def15ba72cf1b11926)
+  (whose prebuilt `snd-usb-audio`/`snd-hwdep`/`snd-usbmidi-lib`/`cdc-acm`
+  modules are redistributed here under GPLv2 — built from vanilla
+  [kernel.org](https://kernel.org) 4.9.170 with
+  [Knulli](https://github.com/knulli-cfw/distribution)'s H700 kernel config),
+  plus [jamesMcMeex/m8c-rg35xx-knulli](https://github.com/jamesMcMeex/m8c-rg35xx-knulli)
+  and [TimDeve/m8c-rg35xxsp](https://github.com/TimDeve/m8c-rg35xxsp) which
+  proved these modules run on this hardware family.
 
 ## License
 

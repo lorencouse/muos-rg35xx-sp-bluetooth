@@ -18,6 +18,19 @@ exec >>"$LOG" 2>&1
 
 echo "=== $(date '+%Y-%m-%d %H:%M:%S') bluetooth init ==="
 
+# USB-C audio: load the class driver so USB-C headphones work when plugged
+# into the OTG port. The kernel auto-switches the port to host on detection
+# (flip the plug if nothing happens - ID sensing is one-orientation here).
+for M in snd-hwdep snd-usbmidi-lib snd-usb-audio; do
+	insmod "/mnt/mmc/MUOS/bluetooth/modules/$M.ko" 2>/dev/null
+done
+echo "usb-audio modules loaded"
+
+# Route audio to USB headphones automatically while they are plugged in.
+pgrep -f "usb-audio-watch.s[h]" >/dev/null 2>&1 ||
+	setsid /mnt/mmc/MUOS/bluetooth/usb-audio-watch.sh >/dev/null 2>&1 </dev/null &
+echo "usb-audio route watcher started"
+
 if BT_READY; then
 	echo "hci0 up: $(hciconfig hci0 2>/dev/null | sed -n 's/.*BD Address: \([0-9A-F:]*\).*/\1/p')"
 else
