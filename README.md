@@ -58,6 +58,7 @@ you're at the launcher.
    MUOS/bluetooth/modules/        USB-audio kernel modules (see USB-C section)
    MUOS/bluetooth/usb-audio-watch.sh  USB headphone auto-routing
    MUOS/init/10-bluetooth.sh      boot hook
+   MUOS/init/20-wifi-autoconnect.sh  Wi-Fi: connect to best saved profile (optional)
    ```
 3. Boot the device and enable **Configuration → Advanced Settings →
    User Init Scripts** so the boot hook runs.
@@ -112,6 +113,29 @@ stack is built into muOS). Rebuild
 instructions: [mnml's gist](https://gist.github.com/mnml/12f75bbf16eac4def15ba72cf1b11926)
 (vanilla kernel.org 4.9.170 source + Knulli's kernel config + the module
 directories `sound/core`, `sound/usb`, `drivers/usb/class`).
+
+## Wi-Fi: auto-connect to the best saved network
+
+Unrelated to Bluetooth, but the same install and it fixes the other radio.
+Stock muOS only ever reconnects to the *last used* network, so moving between
+home, work and a phone hotspot means opening the profile menu every time.
+`MUOS/init/20-wifi-autoconnect.sh` runs at boot, scans once, and connects to
+the saved profile (`MUOS/network/*.ini`, created with **Y** on the Wi-Fi
+screen) with the highest priority that is actually in range — strongest
+signal on a tie. It loads the profile the same way the Network Profiles
+screen does and then hands off to muOS's own `network.sh`, so all the stock
+error handling applies.
+
+Two optional keys you can add to any profile `.ini`:
+
+```ini
+priority=10      # higher wins when several saved networks are in range (default 0)
+autoconnect=0    # never pick this one automatically (default: allowed)
+```
+
+Leave **Start Network on Boot** off — the hook replaces it (if it is on and
+muOS already connected, the hook does nothing). Log: `MUOS/log/wifi.log`.
+Wake-from-sleep still uses muOS's own *Start Network on Wake* behaviour.
 
 ## Limitations
 
