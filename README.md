@@ -64,8 +64,14 @@ you're at the launcher.
 4. Reboot, then open **Applications → Bluetooth** and pair your headphones.
 
 Everything lives on the SD card's exfat partition, so muOS updates won't
-remove it. Log file: `MUOS/log/bluetooth.log`. To uninstall, delete the three
-paths above (and `MUOS/bluetooth/state/`).
+remove it. Log file: `MUOS/log/bluetooth.log` (kept to a few hundred lines).
+To uninstall, delete the paths listed above plus `MUOS/bluetooth/state/`.
+
+**Using a second SD card?** muOS gives SD2 priority for `MUOS/init` and
+`MUOS/application`: if your SD2 already has those folders, copy this repo's
+`MUOS` folder onto **SD2** as well (or instead), otherwise the boot hook and
+app on SD1 are shadowed and never run. The scripts themselves always look for
+their helpers under `/mnt/mmc/MUOS/bluetooth` (SD1).
 
 ## Tested on
 
@@ -79,7 +85,7 @@ Reports welcome.
 
 muOS's kernel omits `CONFIG_SND_USB_AUDIO`, so USB-C audio doesn't work out of
 the box — but the kernel *does* auto-switch the OTG port between gadget and
-host when it detects a peripheral, and it force-load-compatible kernel modules
+host when it detects a peripheral, and compatible prebuilt kernel modules
 exist. This repo bundles the missing modules (`MUOS/bluetooth/modules/`,
 built for the stock `4.9.170` kernel — vermagic-identical, loads cleanly) and
 the boot hook loads them, so:
@@ -100,8 +106,9 @@ kernel's USB manager on this device (unkillable, needs a power cycle). The
 automatic detection is the only working path, and it is enough.
 
 Kernel-update caveat: the `.ko` modules match the stock `4.9.170` kernel. If
-a future muOS release ships a different kernel build they will silently stop
-loading (Bluetooth is unaffected — its stack is built into muOS). Rebuild
+a future muOS release ships a different kernel build they will stop loading —
+`MUOS/log/bluetooth.log` says so at boot, and Bluetooth is unaffected (its
+stack is built into muOS). Rebuild
 instructions: [mnml's gist](https://gist.github.com/mnml/12f75bbf16eac4def15ba72cf1b11926)
 (vanilla kernel.org 4.9.170 source + Knulli's kernel config + the module
 directories `sound/core`, `sound/usb`, `drivers/usb/class`).
@@ -112,6 +119,11 @@ directories `sound/core`, `sound/usb`, `drivers/usb/class`).
   AAC/aptX/LDAC. Fine for games, adequate for music.
 - Some devices (AirPods included) don't report battery over standard Bluetooth
   profiles; battery shows only when available.
+- Pairing is "just works" only: devices that demand a PIN or on-screen
+  confirmation (rare for headphones) can't be paired from this app.
+- After a muOS **reflash** the card keeps your device list but BlueZ forgets
+  the pairings; the app re-discovers and re-pairs on the next *Connect*
+  (put the headphones in pairing mode).
 - USB-C: **analog-only USB-C headphones** (passive, no DAC chip) can never
   work — the port has no analog audio mode. Anything that is a real USB audio
   device (almost all USB-C headsets and dongles) works.
@@ -125,7 +137,8 @@ directories `sound/core`, `sound/usb`, `drivers/usb/class`).
   sink.
 - The app (`bt-ui.py`) is a Python TUI rendered inside `muterm` (muOS's
   built-in virtual terminal). Gamepad input is read straight from the evdev
-  node, so it works regardless of what the terminal forwards.
+  node muOS names in `/opt/muos/device/config/input/general`, so it works
+  regardless of what the terminal forwards.
 - Audio routing resolves PipeWire sinks by `node.name`, never by label —
   the SP exposes two sinks both labelled "Built-in Audio Stereo" (speaker and
   HDMI), and Bluetooth sink ids change on every reconnect.
@@ -145,7 +158,7 @@ This builds on prior work by others:
   Bluetooth stack this project switches on; `muterm` makes the UI possible.
 - **USB-C audio** stands on the DirtyWave M8 community's work:
   [mnml's build gist](https://gist.github.com/mnml/12f75bbf16eac4def15ba72cf1b11926)
-  (whose prebuilt `snd-usb-audio`/`snd-hwdep`/`snd-usbmidi-lib`/`cdc-acm`
+  (whose prebuilt `snd-usb-audio`/`snd-hwdep`/`snd-usbmidi-lib`
   modules are redistributed here under GPLv2 — built from vanilla
   [kernel.org](https://kernel.org) 4.9.170 with
   [Knulli](https://github.com/knulli-cfw/distribution)'s H700 kernel config),

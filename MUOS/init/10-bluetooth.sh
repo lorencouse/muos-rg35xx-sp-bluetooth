@@ -1,5 +1,5 @@
 #!/bin/sh
-# muOS user-init hook: bring up Bluetooth on the RG35XX SP.
+# muOS user-init hook: bring up Bluetooth (and USB-C audio) on the RG35XX SP.
 #
 # muOS ships BlueZ, rtk_hciattach, the RTL8821C firmware and PipeWire's bluez5
 # plugin, but sets board/bluetooth=0 for rg35xx-sp and never attaches the
@@ -14,22 +14,31 @@
 
 LOG="/mnt/mmc/MUOS/log/bluetooth.log"
 mkdir -p "$(dirname "$LOG")"
+# Keep the log bounded: only the last few hundred lines survive a boot.
+if [ -f "$LOG" ] && [ "$(wc -l <"$LOG")" -gt 400 ]; then
+	tail -n 300 "$LOG" >"$LOG.tmp" && mv -f "$LOG.tmp" "$LOG"
+fi
 exec >>"$LOG" 2>&1
 
-echo "=== $(date '+%Y-%m-%d %H:%M:%S') bluetooth init ==="
+echo "=== $(date '+%Y-%m-%d %H:%M:%S') bluetooth init (kernel $(uname -r)) ==="
 
 # USB-C audio: load the class driver so USB-C headphones work when plugged
 # into the OTG port. The kernel auto-switches the port to host on detection
 # (flip the plug if nothing happens - ID sensing is one-orientation here).
 for M in snd-hwdep snd-usbmidi-lib snd-usb-audio; do
-	insmod "/mnt/mmc/MUOS/bluetooth/modules/$M.ko" 2>/dev/null
+	[ -d "/sys/module/$(echo "$M" | tr - _)" ] ||
+		insmod "$BT_DIR/modules/$M.ko" 2>&1
 done
-echo "usb-audio modules loaded"
-
-# Route audio to USB headphones automatically while they are plugged in.
-pgrep -f "usb-audio-watch.s[h]" >/dev/null 2>&1 ||
-	setsid /mnt/mmc/MUOS/bluetooth/usb-audio-watch.sh >/dev/null 2>&1 </dev/null &
-echo "usb-audio route watcher started"
+if [ -d /sys/module/snd_usb_audio ]; then
+	echo "usb-audio modules loaded"
+	# Route audio to USB headphones automatically while they are plugged in.
+	pgrep -f "usb-audio-watch.s[h]" >/dev/null 2>&1 ||
+		setsid "$BT_DIR/usb-audio-watch.sh" >/dev/null 2>&1 </dev/null &
+	echo "usb-audio route watcher started"
+else
+	echo "WARNING: snd-usb-audio did not load - modules were built for 4.9.170;" \
+		"USB-C audio is unavailable on this kernel (Bluetooth unaffected)"
+fi
 
 if BT_READY; then
 	echo "hci0 up: $(hciconfig hci0 2>/dev/null | sed -n 's/.*BD Address: \([0-9A-F:]*\).*/\1/p')"
@@ -46,10 +55,10 @@ while ! pgrep -f wireplumber >/dev/null 2>&1 && [ "$I" -lt 30 ]; do
 done
 sleep 2
 
-python3 - <<'PYEOF'
-import json, re, subprocess, time
+python3 - "$BT_STATE/devices.json" <<'PYEOF'
+import json, os, re, subprocess, sys, time
 
-REG = "/mnt/mmc/MUOS/bluetooth/state/devices.json"
+REG = sys.argv[1]
 
 def bt(*args, timeout=8):
     try:
@@ -60,19 +69,28 @@ def bt(*args, timeout=8):
     except subprocess.TimeoutExpired:
         return ""
 
+def save(reg):
+    tmp = REG + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(reg, f, indent=1)
+    os.replace(tmp, REG)
+
 try:
     reg = json.load(open(REG))
 except Exception:
     reg = []
+if not isinstance(reg, list):
+    reg = []
+reg = [d for d in reg if isinstance(d, dict) and isinstance(d.get("mac"), str)]
 
 autos = sorted([d for d in reg if d.get("auto")],
-               key=lambda d: -d.get("last", 0))
+               key=lambda d: -(d.get("last") or 0))
 if not autos:
     print("autoconnect: no devices marked auto")
     raise SystemExit
 
 for d in autos:
-    mac, name = d["mac"], d["name"]
+    mac, name = d["mac"], d.get("name") or d["mac"]
     print("autoconnect: trying %s (%s)" % (name, mac))
     bt("connect", mac, timeout=15)
     ok = False
@@ -84,11 +102,11 @@ for d in autos:
     if not ok:
         print("autoconnect: %s not reachable" % name)
         continue
-    node = "bluez_output." + mac.replace("_", ":").replace(":", "_")
+    node = "bluez_output." + mac.replace(":", "_")
     for _ in range(8):
         out = subprocess.run(["pw-cli", "ls", "Node"], capture_output=True,
                              text=True).stdout
-        ids, cur, sid = {}, None, None
+        cur, sid = None, None
         for line in out.splitlines():
             m = re.match(r"\s*id (\d+),", line)
             if m:
@@ -103,8 +121,10 @@ for d in autos:
             print("autoconnect: connected, audio on %s" % name)
             break
         time.sleep(1)
+    else:
+        print("autoconnect: connected, but no audio sink appeared for %s" % name)
     d["last"] = int(time.time())
-    json.dump(reg, open(REG, "w"), indent=1)
+    save(reg)
     break
 PYEOF
 

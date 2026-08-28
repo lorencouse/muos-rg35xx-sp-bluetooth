@@ -7,10 +7,21 @@ straight from the gamepad's evdev node, independent of the pty.
 """
 import json, os, re, select, struct, subprocess, sys, time
 
-EV_DEV = "/dev/input/event1"
-STATE = "/mnt/mmc/MUOS/bluetooth/state"
+BT_DIR = "/mnt/mmc/MUOS/bluetooth"          # same constant as bt-common.sh
+STATE = os.path.join(BT_DIR, "state")
 REGISTRY = os.path.join(STATE, "devices.json")
 PF_INTERNAL = "/opt/muos/device/config/audio/pf_internal"
+INPUT_CFG = "/opt/muos/device/config/input/general"  # gamepad evdev node
+
+
+def _read(path, default=""):
+    try:
+        return open(path).read().strip() or default
+    except OSError:
+        return default
+
+
+EV_DEV = _read(INPUT_CFG, "/dev/input/event1")
 
 EV_KEY, EV_ABS = 1, 3
 KEYMAP = {304: "A", 305: "B", 306: "Y", 307: "X",
@@ -88,7 +99,8 @@ def bt(*args, timeout=8):
 
 def bt_info(mac, timeout=4):
     out = bt("info", mac, timeout=timeout)
-    d = {"paired": "Paired: yes" in out,
+    d = {"known": bool(out.strip()) and "not available" not in out,
+         "paired": "Paired: yes" in out,
          "connected": "Connected: yes" in out,
          "trusted": "Trusted: yes" in out,
          "audio": bool(re.search(r"Icon: audio|Audio Sink|Headset", out)),
@@ -146,10 +158,7 @@ def wpctl(*args):
 
 
 def speaker_node():
-    try:
-        return open(PF_INTERNAL).read().strip()
-    except OSError:
-        return ""
+    return _read(PF_INTERNAL)
 
 
 def bt_node_of(mac):
@@ -157,6 +166,8 @@ def bt_node_of(mac):
 
 
 def route_to(node_prefix, volume=None):
+    if not node_prefix:  # "" would match the first node of all - never guess
+        return False
     ids = sink_ids()
     for node, i in ids.items():
         if node.startswith(node_prefix):
@@ -171,15 +182,26 @@ def route_to(node_prefix, volume=None):
 # ---------------- registry ----------------
 def load_reg():
     try:
-        return json.load(open(REGISTRY))
+        reg = json.load(open(REGISTRY))
     except Exception:
         return []
+    if not isinstance(reg, list):
+        return []
+    out = []
+    for d in reg:
+        if isinstance(d, dict) and isinstance(d.get("mac"), str):
+            d.setdefault("name", d["mac"])
+            d.setdefault("auto", False)
+            d.setdefault("last", 0)
+            out.append(d)
+    return out
 
 
 def save_reg(reg):
     os.makedirs(STATE, exist_ok=True)
     tmp = REGISTRY + ".tmp"
-    json.dump(reg, open(tmp, "w"), indent=1)
+    with open(tmp, "w") as f:
+        json.dump(reg, f, indent=1)
     os.replace(tmp, REGISTRY)
 
 
@@ -195,6 +217,14 @@ def log_screen(title, lines):
     draw([bold(" " + title), " " + "-" * 50] + [" " + l for l in lines])
 
 
+def start_scan(seconds=600):
+    """Background `scan on`; the only place --timeout is appropriate."""
+    return subprocess.Popen(["bluetoothctl", "--timeout", str(seconds),
+                             "scan", "on"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            stdin=subprocess.DEVNULL)
+
+
 def connect_flow(pad, reg, mac, name):
     steps = []
 
@@ -205,12 +235,26 @@ def connect_flow(pad, reg, mac, name):
     entry = reg_get(reg, mac)
     info = bt_info(mac)
     if not info["paired"]:
+        scan = None
+        if not info["known"]:
+            # BlueZ has no record of it (fresh muOS install, or it was
+            # removed): it must be discovered again before it can be paired.
+            step("Looking for %s ..." % name)
+            scan = start_scan(30)
+            for _ in range(25):
+                time.sleep(1)
+                if bt_info(mac, timeout=2)["known"]:
+                    break
         step("Pairing with %s ..." % name)
         bt("pair", mac, timeout=35)
+        if scan is not None:
+            scan.kill()
         info = bt_info(mac)
         if not info["paired"]:
+            # Drop the half-paired stub, or the next attempt fails outright.
+            bt("remove", mac, timeout=5)
             step(sgr("Pairing FAILED.", 1, 31))
-            step("Is the device still in pairing mode?")
+            step("Is the device powered on and in pairing mode?")
             wait_key(pad, steps, "CONNECTING")
             return False
     bt("trust", mac, timeout=5)
@@ -254,28 +298,36 @@ def wait_key(pad, lines, title):
     pad.poll(3600)
 
 
+REPROBE_TICKS = 8  # re-check a non-audio-looking device every ~10 s
+
+
 def scan_screen(pad, reg):
-    scan = subprocess.Popen(["bluetoothctl", "--timeout", "600", "scan", "on"],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            stdin=subprocess.DEVNULL)
+    scan = start_scan()
     known = {d["mac"] for d in reg}
-    probed, found, sel = {}, [], 0
+    probed, found, sel = {}, [], 0   # probed: mac -> tick of last info call
+    listed = set()
     spin = "|/-\\"
     tick = 0
     try:
         while True:
+            if scan.poll() is not None:  # --timeout elapsed: keep scanning
+                scan = start_scan()
             out = bt("devices", timeout=4)
             for m in re.finditer(r"Device ([0-9A-Fa-f:]{17}) (.+)", out):
                 mac, name = m.group(1).upper(), m.group(2).strip()
-                if mac in known or mac in probed:
+                if mac in known or mac in listed:
                     continue
                 if name == mac.replace(":", "-"):
+                    continue  # no name yet; look again next round
+                # A device's class/UUIDs can arrive after its first
+                # appearance, so an early "not audio" verdict is not final.
+                if mac in probed and tick - probed[mac] < REPROBE_TICKS:
                     continue
-                probed[mac] = True
+                probed[mac] = tick
                 inf = bt_info(mac, timeout=2)
                 if is_audio(inf):
                     found.append((mac, inf["name"] or name))
+                    listed.add(mac)
             lines = [bold(" PAIR NEW DEVICE") +
                      dim("   scanning " + spin[tick % 4]),
                      " " + "-" * 50,
@@ -379,6 +431,8 @@ def main_screen(pad):
         cur_node = default_sink_node()
         on_bt = cur_node.startswith("bluez_output")
         out_name = "Speaker"
+        if cur_node.startswith("alsa_output.usb"):
+            out_name = "USB headphones"
         if on_bt:
             mac = cur_node[len("bluez_output."):].split(".")[0].replace("_", ":")
             e = reg_get(reg, mac)
@@ -437,22 +491,39 @@ def main_screen(pad):
                 device_screen(pad, load_reg(), reg[sel]["mac"])
 
 
-def main():
+def run(pad):
     draw([bold(" BLUETOOTH"), "", " Starting Bluetooth adapter..."])
     r = subprocess.run(["sh", "-c",
-                        ". /mnt/mmc/MUOS/bluetooth/bt-common.sh; BT_READY"],
-                       capture_output=True, timeout=60)
+                        ". %s/bt-common.sh; BT_READY" % BT_DIR],
+                       capture_output=True, timeout=90)
     if r.returncode != 0:
         draw([bold(" BLUETOOTH"), "",
               sgr(" Bluetooth adapter failed to start.", 1, 31),
               " Try rebooting the device.", "",
               yellow(" press any button to exit")])
-        pad = Pad()
         pad.poll(3600)
         return
-    pad = Pad()
     main_screen(pad)
     draw([" bye"])
+
+
+def main():
+    pad = None
+    try:
+        pad = Pad()
+        run(pad)
+    except Exception:
+        # muterm closes the moment we exit, so hold the traceback on screen.
+        import traceback
+        tb = traceback.format_exc().splitlines()
+        draw([bold(" BLUETOOTH"), sgr(" The app hit an error:", 1, 31), ""] +
+             [" " + l[:60] for l in tb[-10:]] +
+             ["", " Log this at github.com/lorencouse/muos-rg35xx-sp-bluetooth",
+              "", yellow(" press any button to exit")])
+        if pad is not None:
+            pad.poll(3600)
+        else:
+            time.sleep(20)
 
 
 if __name__ == "__main__":
