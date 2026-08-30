@@ -30,7 +30,18 @@ while :; do
 		pgrep -f "usb-media-buttons.p[y]" >/dev/null 2>&1 ||
 			setsid python3 "$BT_DIR/usb-media-buttons.py" >/dev/null 2>&1 </dev/null &
 	elif [ -z "$NODE" ] && [ -n "$PREV" ]; then
-		BT_RESTORE_SPEAKER
+		# USB gone: hand audio back to still-connected Bluetooth
+		# headphones first, the built-in speaker otherwise.
+		BTN=$(printf '%s\n' "$NODES" |
+			sed -n 's/.*node\.name = "\(bluez_output[^"]*\)".*/\1/p' | head -1)
+		BID=""
+		[ -n "$BTN" ] && BID=$(BT_ID_FOR_NODE "$BTN")
+		if [ -n "$BID" ]; then
+			wpctl set-default "$BID" 2>/dev/null
+			wpctl set-mute "$BID" 0 2>/dev/null
+		else
+			BT_RESTORE_SPEAKER
+		fi
 	fi
 
 	PREV="$CUR"

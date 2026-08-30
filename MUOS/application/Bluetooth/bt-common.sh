@@ -24,8 +24,11 @@ BT_UP() {
 	pgrep -f rtk_hciattach >/dev/null 2>&1 ||
 		setsid rtk_hciattach -n -s 115200 /dev/ttyS1 rtk_h5 >/dev/null 2>&1 </dev/null &
 
+	# A cold attach takes ~5s, but after a crash mid-connection the firmware
+	# init can take 20s+; giving up early kills an attach that was about to
+	# succeed and churns forever.
 	I=0
-	while [ ! -e /sys/class/bluetooth/hci0 ] && [ "$I" -lt 30 ]; do
+	while [ ! -e /sys/class/bluetooth/hci0 ] && [ "$I" -lt 60 ]; do
 		sleep 0.5
 		I=$((I + 1))
 	done
@@ -68,13 +71,20 @@ BT_RECOVER() {
 	rfkill block bluetooth 2>/dev/null
 	sleep 1
 	rfkill unblock bluetooth 2>/dev/null
-	sleep 1
+	# The chip needs a few seconds after power-on before the UART will sync;
+	# attaching at ~1s reliably fails, at ~5s it reliably works.
+	sleep 5
 	BT_UP
 }
 
 # Everything needed before any bluetoothctl call.
 BT_READY() {
-	BT_UP || return 1
+	# A failed plain attach means the chip is stuck in its previous
+	# session's state (hci0 gone, firmware at the negotiated baud) - only
+	# BT_RECOVER's power cycle can bring it back from that.
+	if ! BT_UP; then
+		BT_RECOVER || return 1
+	fi
 	hciconfig hci0 up 2>/dev/null
 	if ! BT_ALIVE; then
 		BT_RECOVER || return 1

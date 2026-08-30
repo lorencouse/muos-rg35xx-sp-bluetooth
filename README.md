@@ -53,12 +53,23 @@ Plus a boot hook that brings the adapter up on every boot and reconnects your
 last-used auto-connect device, so sound is already in your ears by the time
 you're at the launcher.
 
-While a device is connected a **link watchdog** (`bt-watch.sh`) runs in the
-background: if the controller stops responding (seen after the device sleeps)
-it re-attaches the adapter, if the link drops it reconnects, and if your
-headphones are really gone it routes audio back to the speaker instead of
-leaving everything silent. Every event lands in `MUOS/log/bluetooth.log` with
-a timestamp, so a dropout can be diagnosed afterwards.
+A **link watchdog** (`bt-watch.sh`) runs in the background whenever a device
+is registered: if the controller stops responding (seen after the device
+sleeps) it power-cycles and re-attaches the adapter, if the link drops it
+reconnects and re-routes audio, and if your headphones are really gone it
+routes audio back to the speaker instead of leaving everything silent — then
+keeps listening, so the moment the headphones reconnect on their own the
+sound follows them. Every event lands in `MUOS/log/bluetooth.log` with a
+timestamp, so a dropout can be diagnosed afterwards.
+
+**Sleep wakelock**: muOS suspends the device after its idle-sleep timeout
+even while music plays (button presses count as activity, audio does not) —
+that suspend is what kills Bluetooth audio mid-track on a stock setup. The
+boot hook patches one marker-guarded line into muOS's `idle.sh` so that
+while Bluetooth audio is actually streaming, idle *sleep* is inhibited —
+the screen still dims and turns off as configured. The patch re-applies
+itself automatically after a muOS update, and a stale lock can never block
+sleep (it is ignored unless the watchdog holding it is alive).
 
 ## Install
 
@@ -149,8 +160,14 @@ directories `sound/core`, `sound/usb`, `drivers/usb/class`).
 - Connection health is judged by a real HCI round-trip (`hciconfig hci0
   version`), because after sleep the adapter can look fine (`hci0` present,
   UP flag set, BlueZ saying "Connected: yes") while the UART behind it is
-  dead. Recovery is a re-attach: kill `rtk_hciattach`, wait for `hci0` to
-  vanish, bring it up again.
+  dead. Recovery is a full re-attach: kill `rtk_hciattach`, wait for `hci0`
+  to unregister, **power-cycle the chip via rfkill** (a warm re-attach can
+  never sync — the chip is still running the old session's firmware at the
+  negotiated baud), then attach again. Both wedge shapes are handled:
+  hci0 present-but-dead and hci0 gone entirely.
+- On USB-C unplug, audio returns to still-connected Bluetooth headphones
+  first, the speaker otherwise; while USB headphones are plugged in the
+  watchdog never steals the default sink from them.
 - Disconnect *untrusts* the device first — BlueZ accepts incoming connections
   from trusted devices, so aggressive headphones would otherwise reconnect
   themselves within seconds. The next Connect trusts them again.

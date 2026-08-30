@@ -40,6 +40,39 @@ else
 		"USB-C audio is unavailable on this kernel (Bluetooth unaffected)"
 fi
 
+# Sleep wakelock hook: muOS suspends after settings/power/idle_sleep seconds
+# without button input - streaming audio does not count, so music dies mid-
+# track and the suspend wedges the BT controller. muOS's idle.sh daemon
+# already computes an idle_inhibit level every 5s; this patches one marker-
+# guarded line into it so an alive PID in /tmp/bt-audio-wakelock (written by
+# bt-watch.sh while audio streams) upgrades the inhibit to sleep-only.
+# Re-applies itself after any muOS update; degrades to plain post-resume
+# recovery if the anchor line ever changes.
+IDLE_SH="/opt/muos/script/mux/idle.sh"
+if [ -f "$IDLE_SH" ] && ! grep -q "bt-wakelock" "$IDLE_SH"; then
+	if grep -q 'SET_VAR "system" "idle_inhibit" "$INHIBIT"' "$IDLE_SH"; then
+		awk '/SET_VAR "system" "idle_inhibit" "\$INHIBIT"/ && !done {
+			print "\t\t[ \"$INHIBIT\" -eq \"$INHIBIT_NONE\" ] && kill -0 \"$(cat /tmp/bt-audio-wakelock 2>/dev/null)\" 2>/dev/null && INHIBIT=$INHIBIT_SLEEP # bt-wakelock"
+			done = 1
+		}
+		{ print }' "$IDLE_SH" >"$IDLE_SH.tmp" &&
+			sh -n "$IDLE_SH.tmp" &&
+			cp "$IDLE_SH" "$IDLE_SH.bak-btwakelock" &&
+			mv "$IDLE_SH.tmp" "$IDLE_SH" &&
+			chmod +x "$IDLE_SH" && {
+			echo "patched idle.sh with bt-wakelock hook"
+			IP="$(cat /run/muos/idle.pid 2>/dev/null)"
+			[ -n "$IP" ] && kill "$IP" 2>/dev/null
+			rm -f /run/muos/idle.pid
+			"$IDLE_SH" start
+			echo "idle daemon restarted"
+		}
+		rm -f "$IDLE_SH.tmp"
+	else
+		echo "WARNING: idle.sh anchor not found - sleep wakelock unavailable (muOS changed it?)"
+	fi
+fi
+
 if BT_READY; then
 	echo "hci0 up: $(hciconfig hci0 2>/dev/null | sed -n 's/.*BD Address: \([0-9A-F:]*\).*/\1/p')"
 else
@@ -54,6 +87,9 @@ while ! pgrep -f wireplumber >/dev/null 2>&1 && [ "$I" -lt 30 ]; do
 	I=$((I + 1))
 done
 sleep 2
+
+# A pre-reboot "route to speaker" choice does not outlive the boot.
+rm -f "$BT_STATE/user-speaker"
 
 python3 - "$BT_STATE/devices.json" <<'PYEOF'
 import json, os, re, subprocess, sys, time
@@ -88,6 +124,18 @@ autos = sorted([d for d in reg if d.get("auto")],
 if not autos:
     print("autoconnect: no devices marked auto")
     raise SystemExit
+
+def start_watch(mac):
+    # Link watchdog: recovers a wedged controller, reconnects after drops,
+    # falls back to the speaker, routes audio when the device reconnects on
+    # its own. Started even when the boot connect fails - its standby mode
+    # picks the device up whenever it appears.
+    subprocess.run(["pkill", "-f", "bt-watch.s[h]"], capture_output=True)
+    subprocess.Popen(
+        ["setsid", "/run/muos/storage/application/Bluetooth/bt-watch.sh", mac],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL)
+    print("autoconnect: link watchdog started")
 
 for d in autos:
     mac, name = d["mac"], d.get("name") or d["mac"]
@@ -125,15 +173,11 @@ for d in autos:
         print("autoconnect: connected, but no audio sink appeared for %s" % name)
     d["last"] = int(time.time())
     save(reg)
-    # Link watchdog: recovers a wedged controller, reconnects after drops,
-    # falls back to the speaker if the device is really gone. Logs here too.
-    subprocess.run(["pkill", "-f", "bt-watch.s[h]"], capture_output=True)
-    subprocess.Popen(
-        ["setsid", "/run/muos/storage/application/Bluetooth/bt-watch.sh", mac],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL)
-    print("autoconnect: link watchdog started")
+    start_watch(mac)
     break
+else:
+    # Nothing reachable now; watch for the favourite to appear later.
+    start_watch(autos[0]["mac"])
 PYEOF
 
 echo "=== done ==="

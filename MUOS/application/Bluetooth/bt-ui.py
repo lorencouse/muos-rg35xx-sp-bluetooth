@@ -225,6 +225,21 @@ def start_scan(seconds=600):
                             stdin=subprocess.DEVNULL)
 
 
+USER_SPEAKER = os.path.join(STATE, "user-speaker")
+
+
+def set_user_speaker(on):
+    # Tells the watchdog the user deliberately routed audio to the speaker,
+    # so it must not "fix" the default sink back to Bluetooth.
+    try:
+        if on:
+            open(USER_SPEAKER, "w").close()
+        else:
+            os.unlink(USER_SPEAKER)
+    except OSError:
+        pass
+
+
 def kill_watchdog():
     # Bracket pattern so a stray shell quoting this string never self-matches.
     subprocess.run(["pkill", "-f", "bt-watch.s[h]"], capture_output=True)
@@ -297,6 +312,7 @@ def connect_flow(pad, reg, mac, name):
     entry["name"] = name
     entry["last"] = int(time.time())
     save_reg(reg)
+    set_user_speaker(False)  # a fresh connect means: play here
     start_watchdog(mac)
     step(green("Connected!") if routed else
          "Connected (no audio sink - not an audio device?)")
@@ -314,6 +330,7 @@ def disconnect_flow(pad, mac, name):
         log_screen("DISCONNECT", steps + ["", dim("please wait...")])
 
     kill_watchdog()  # or it would reconnect right behind us
+    set_user_speaker(False)  # stale flag must not survive the disconnect
     step("Disconnecting from %s ..." % name)
     # Untrust first: BlueZ accepts incoming connections from trusted devices,
     # and many headphones re-initiate the moment they are dropped - which
@@ -534,11 +551,15 @@ def main_screen(pad):
             sel = (sel + 1) % n
         elif key == "Y":
             if on_bt:
+                set_user_speaker(True)
                 route_to(speaker_node())
             else:
                 for d in reg:
                     if conn.get(d["mac"], {}).get("connected"):
-                        route_to(bt_node_of(d["mac"]), "0.8")
+                        # No volume here: switching outputs should not
+                        # stomp whatever level the user has set.
+                        set_user_speaker(False)
+                        route_to(bt_node_of(d["mac"]))
                         break
         elif key == "A":
             if sel == n - 1:
