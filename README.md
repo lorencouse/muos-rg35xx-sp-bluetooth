@@ -53,6 +53,13 @@ Plus a boot hook that brings the adapter up on every boot and reconnects your
 last-used auto-connect device, so sound is already in your ears by the time
 you're at the launcher.
 
+While a device is connected a **link watchdog** (`bt-watch.sh`) runs in the
+background: if the controller stops responding (seen after the device sleeps)
+it re-attaches the adapter, if the link drops it reconnects, and if your
+headphones are really gone it routes audio back to the speaker instead of
+leaving everything silent. Every event lands in `MUOS/log/bluetooth.log` with
+a timestamp, so a dropout can be diagnosed afterwards.
+
 ## Install
 
 1. Download `muOS-BT-USB-Audio-<version>.muxzip` from the
@@ -139,6 +146,14 @@ directories `sound/core`, `sound/usb`, `drivers/usb/class`).
   `rtk_hciattach`, starts `bluetoothd`, then auto-connects the most recently
   used device marked `auto` in the registry and makes it the default PipeWire
   sink.
+- Connection health is judged by a real HCI round-trip (`hciconfig hci0
+  version`), because after sleep the adapter can look fine (`hci0` present,
+  UP flag set, BlueZ saying "Connected: yes") while the UART behind it is
+  dead. Recovery is a re-attach: kill `rtk_hciattach`, wait for `hci0` to
+  vanish, bring it up again.
+- Disconnect *untrusts* the device first — BlueZ accepts incoming connections
+  from trusted devices, so aggressive headphones would otherwise reconnect
+  themselves within seconds. The next Connect trusts them again.
 - The app (`bt-ui.py`) is a Python TUI rendered inside `muterm` (muOS's
   built-in virtual terminal). Gamepad input is read straight from the evdev
   node muOS names in `/opt/muos/device/config/input/general`, so it works

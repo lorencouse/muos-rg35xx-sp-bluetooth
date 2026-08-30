@@ -125,6 +125,14 @@ for d in autos:
         print("autoconnect: connected, but no audio sink appeared for %s" % name)
     d["last"] = int(time.time())
     save(reg)
+    # Link watchdog: recovers a wedged controller, reconnects after drops,
+    # falls back to the speaker if the device is really gone. Logs here too.
+    subprocess.run(["pkill", "-f", "bt-watch.s[h]"], capture_output=True)
+    subprocess.Popen(
+        ["setsid", "/run/muos/storage/application/Bluetooth/bt-watch.sh", mac],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL)
+    print("autoconnect: link watchdog started")
     break
 PYEOF
 

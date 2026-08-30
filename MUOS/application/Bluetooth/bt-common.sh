@@ -39,10 +39,36 @@ BT_DAEMON() {
 	sleep 3
 }
 
+# True when the controller answers an actual HCI request. After the device
+# sleeps, hci0 can survive with its UP flag set while the UART link behind it
+# is dead ("Connected: yes" forever, disconnect ignored) - only a real
+# round-trip like Read Local Version tells the truth.
+BT_ALIVE() {
+	hciconfig hci0 version >/dev/null 2>&1
+}
+
+# Tear down a wedged attach and redo the bringup. Killing rtk_hciattach makes
+# hci0 disappear; BT_UP then re-attaches with a fresh firmware load, which
+# also drops any half-dead audio link at the radio level.
+BT_RECOVER() {
+	pkill -f 'rtk_hciattac[h]' 2>/dev/null
+	I=0
+	while [ -e /sys/class/bluetooth/hci0 ] && [ "$I" -lt 20 ]; do
+		sleep 0.5
+		I=$((I + 1))
+	done
+	BT_UP
+}
+
 # Everything needed before any bluetoothctl call.
 BT_READY() {
 	BT_UP || return 1
 	hciconfig hci0 up 2>/dev/null
+	if ! BT_ALIVE; then
+		BT_RECOVER || return 1
+		hciconfig hci0 up 2>/dev/null
+		BT_ALIVE || return 1
+	fi
 	BT_DAEMON
 	bluetoothctl --timeout 5 power on </dev/null >/dev/null 2>&1
 	return 0

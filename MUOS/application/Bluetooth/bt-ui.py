@@ -225,6 +225,19 @@ def start_scan(seconds=600):
                             stdin=subprocess.DEVNULL)
 
 
+def kill_watchdog():
+    # Bracket pattern so a stray shell quoting this string never self-matches.
+    subprocess.run(["pkill", "-f", "bt-watch.s[h]"], capture_output=True)
+
+
+def start_watchdog(mac):
+    kill_watchdog()
+    subprocess.Popen(
+        ["setsid", os.path.join(BT_DIR, "bt-watch.sh"), mac],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL)
+
+
 def connect_flow(pad, reg, mac, name):
     steps = []
 
@@ -284,12 +297,56 @@ def connect_flow(pad, reg, mac, name):
     entry["name"] = name
     entry["last"] = int(time.time())
     save_reg(reg)
+    start_watchdog(mac)
     step(green("Connected!") if routed else
          "Connected (no audio sink - not an audio device?)")
     if routed:
         step("Sound now plays through %s." % name)
     wait_key(pad, steps, "CONNECTING")
     return True
+
+
+def disconnect_flow(pad, mac, name):
+    steps = []
+
+    def step(s):
+        steps.append(s)
+        log_screen("DISCONNECT", steps + ["", dim("please wait...")])
+
+    kill_watchdog()  # or it would reconnect right behind us
+    step("Disconnecting from %s ..." % name)
+    # Untrust first: BlueZ accepts incoming connections from trusted devices,
+    # and many headphones re-initiate the moment they are dropped - which
+    # looks exactly like the disconnect never happening. connect_flow trusts
+    # again on the next connect.
+    bt("untrust", mac, timeout=5)
+    bt("disconnect", mac, timeout=12)
+    ok = False
+    for _ in range(6):
+        if not bt_info(mac, timeout=3)["connected"]:
+            ok = True
+            break
+        time.sleep(1)
+    if not ok:
+        # Still "Connected: yes": the controller is likely wedged and the
+        # state is stale. Re-attaching hci0 kills the link at radio level.
+        step("Not responding - resetting Bluetooth adapter ...")
+        try:
+            subprocess.run(["sh", "-c",
+                            ". %s/bt-common.sh; BT_RECOVER && BT_READY"
+                            % BT_DIR],
+                           capture_output=True, timeout=90)
+        except subprocess.TimeoutExpired:
+            pass
+        ok = not bt_info(mac, timeout=3)["connected"]
+    route_to(speaker_node())
+    if ok:
+        step(green("Disconnected."))
+        step("Sound now plays through the speaker.")
+    else:
+        step(sgr("Disconnect FAILED.", 1, 31))
+        step("Try once more, or reboot the device.")
+    wait_key(pad, steps, "DISCONNECT")
 
 
 def wait_key(pad, lines, title):
@@ -402,9 +459,7 @@ def device_screen(pad, reg, mac):
         elif key == "A":
             if sel == 0:
                 if inf["connected"]:
-                    log_screen("DISCONNECT", ["Disconnecting..."])
-                    bt("disconnect", mac, timeout=10)
-                    route_to(speaker_node())
+                    disconnect_flow(pad, mac, entry["name"])
                 else:
                     connect_flow(pad, reg, mac, entry["name"])
             elif sel == 1:
@@ -415,6 +470,7 @@ def device_screen(pad, reg, mac):
                     confirm_forget = True
                 else:
                     log_screen("FORGET", ["Removing %s..." % entry["name"]])
+                    kill_watchdog()
                     bt("disconnect", mac, timeout=8)
                     bt("remove", mac, timeout=8)
                     reg.remove(entry)
