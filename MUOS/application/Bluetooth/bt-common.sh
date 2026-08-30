@@ -48,15 +48,27 @@ BT_ALIVE() {
 }
 
 # Tear down a wedged attach and redo the bringup. Killing rtk_hciattach makes
-# hci0 disappear; BT_UP then re-attaches with a fresh firmware load, which
-# also drops any half-dead audio link at the radio level.
+# hci0 disappear, but a plain re-attach then fails: the chip is still running
+# the old session's firmware at the negotiated (higher) baud and never syncs
+# at 115200. The sunxi-bt rfkill block/unblock power-cycles the chip so the
+# attach starts from scratch (verified on-device 2026-08-30). This also drops
+# any half-dead audio link at the radio level.
 BT_RECOVER() {
 	pkill -f 'rtk_hciattac[h]' 2>/dev/null
+	hciconfig hci0 down 2>/dev/null # flush pending state so hci0 can unregister
+	# A stuck HCI command pins the dying hci0 for its own 10s timeout, so
+	# allow up to 30s. Re-attaching while the old hci0 is still registered
+	# can never work, so give up honestly if it refuses to go.
 	I=0
-	while [ -e /sys/class/bluetooth/hci0 ] && [ "$I" -lt 20 ]; do
+	while [ -e /sys/class/bluetooth/hci0 ] && [ "$I" -lt 60 ]; do
 		sleep 0.5
 		I=$((I + 1))
 	done
+	[ -e /sys/class/bluetooth/hci0 ] && return 1
+	rfkill block bluetooth 2>/dev/null
+	sleep 1
+	rfkill unblock bluetooth 2>/dev/null
+	sleep 1
 	BT_UP
 }
 
@@ -66,8 +78,13 @@ BT_READY() {
 	hciconfig hci0 up 2>/dev/null
 	if ! BT_ALIVE; then
 		BT_RECOVER || return 1
-		hciconfig hci0 up 2>/dev/null
-		BT_ALIVE || return 1
+		# Right after a re-attach the firmware can still be settling.
+		I=0
+		until hciconfig hci0 up 2>/dev/null && BT_ALIVE; do
+			I=$((I + 1))
+			[ "$I" -ge 5 ] && return 1
+			sleep 1
+		done
 	fi
 	BT_DAEMON
 	bluetoothctl --timeout 5 power on </dev/null >/dev/null 2>&1
